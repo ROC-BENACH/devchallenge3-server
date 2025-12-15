@@ -1,78 +1,114 @@
-const express = require('express');
-const bodyParser = require('body-parser');
+const express = require("express");
+const bodyParser = require("body-parser");
 
 const app = express();
 app.use(bodyParser.json());
 
-// Estat del joc en memòria
-let players = [];
-let moves = {};
-let score = { p1: 0, p2: 0 };
-let round = 0;
+const PORT = process.env.PORT || 10000;
 
-// Endpoint per unir-se al joc
-app.post('/join', (req, res) => {
-  if (players.length >= 2) {
-    return res.status(400).json({ error: 'Ja hi ha dos jugadors' });
+// ---------- ESTAT DE LA PARTIDA ----------
+let playersJoined = 0;
+
+let moves = {
+  1: null,
+  2: null
+};
+
+const VALID_HEIGHTS = ["baixa", "mitjana", "alta"];
+const VALID_DIRECTIONS = ["esquerra", "centre", "dreta"];
+
+// ---------- FUNCIONS ----------
+function isValidMove(move) {
+  if (!move) return false;
+
+  const { shot, save } = move;
+  if (!shot || !save) return false;
+
+  return (
+    VALID_HEIGHTS.includes(shot.height) &&
+    VALID_DIRECTIONS.includes(shot.direction) &&
+    VALID_HEIGHTS.includes(save.height) &&
+    VALID_DIRECTIONS.includes(save.direction)
+  );
+}
+
+function calculatePoints(shot, save) {
+  let points = 0;
+  if (shot.height === save.height) points++;
+  if (shot.direction === save.direction) points++;
+  return points;
+}
+
+// ---------- ENDPOINTS ----------
+
+// JOIN
+app.post("/join", (req, res) => {
+  if (playersJoined >= 2) {
+    return res.status(403).json({
+      error: "Ja hi ha 2 jugadors connectats"
+    });
   }
 
-  const playerNumber = players.length + 1;
-  players.push(playerNumber);
-
-  res.json({ player: playerNumber });
+  playersJoined++;
+  res.json({ player: playersJoined });
 });
 
-// Endpoint per fer una jugada
-app.post('/move', (req, res) => {
+// MOVE
+app.post("/move", (req, res) => {
   const { player, shot, save } = req.body;
 
-  if (!player || !shot || !save) {
-    return res.status(400).json({ error: 'Dades incompletes' });
+  if (![1, 2].includes(player)) {
+    return res.status(400).json({ error: "Jugador invàlid" });
   }
 
-  moves[player] = { shot, save };
+  const move = { shot, save };
 
-  // Esperem els dos jugadors
+  if (!isValidMove(move)) {
+    return res.status(400).json({
+      error: "Moviment invàlid",
+      validHeights: VALID_HEIGHTS,
+      validDirections: VALID_DIRECTIONS
+    });
+  }
+
+  moves[player] = move;
+
+  // Esperant l'altre jugador
   if (!moves[1] || !moves[2]) {
-    return res.json({ status: 'Esperando al otro jugador...' });
+    return res.json({
+      status: "waiting",
+      message: "Esperant a l'altre jugador"
+    });
   }
 
-  // Resolució de la ronda
-  round++;
+  // Calcular punts
+  const p1Points = calculatePoints(moves[2].shot, moves[1].save);
+  const p2Points = calculatePoints(moves[1].shot, moves[2].save);
 
-  const p1Shot = moves[1].shot;
-  const p2Save = moves[2].save;
-
-  const p2Shot = moves[2].shot;
-  const p1Save = moves[1].save;
-
-  if (p1Shot.height !== p2Save.height || p1Shot.direction !== p2Save.direction) {
-    score.p1++;
-  }
-
-  if (p2Shot.height !== p1Save.height || p2Shot.direction !== p1Save.direction) {
-    score.p2++;
-  }
-
-  // Reset moviments per la següent ronda
-  moves = {};
-
-  let winner = null;
-  if (round >= 1) {
-    if (score.p1 > score.p2) winner = 'player 1';
-    else if (score.p2 > score.p1) winner = 'player 2';
-    else winner = 'draw';
-  }
+  let winner = "empat";
+  if (p1Points > p2Points) winner = "player1";
+  if (p2Points > p1Points) winner = "player2";
 
   res.json({
-    p1Points: score.p1,
-    p2Points: score.p2,
+    status: "finished",
+    p1Points,
+    p2Points,
     winner
   });
 });
 
-// Port dinàmic per Render
-const PORT = process.env.PORT || 3000;
+// RESET
+app.post("/reset", (req, res) => {
+  playersJoined = 0;
+  moves = { 1: null, 2: null };
+
+  res.json({
+    status: "reset",
+    message: "Partida reiniciada"
+  });
+});
+
+// ---------- START ----------
 app.listen(PORT, () => {
-  console.log(`Servidor activo en puerto ${PORT}`);
+  console.log(`Servidor actiu al port ${PORT}`);
 });
