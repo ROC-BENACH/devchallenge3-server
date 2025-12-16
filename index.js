@@ -1,30 +1,29 @@
 const express = require("express");
 const bodyParser = require("body-parser");
+const crypto = require("crypto");
 
 const app = express();
 app.use(bodyParser.json());
 
 const PORT = process.env.PORT || 10000;
 
-// ---------- ESTAT DE LA PARTIDA ----------
-let playersJoined = 0;
-
-let moves = {
-  1: null,
-  2: null
-};
-
+// ================== CONFIG ==================
+const MAX_ROUNDS = 3;
 const VALID_HEIGHTS = ["baixa", "mitjana", "alta"];
 const VALID_DIRECTIONS = ["esquerra", "centre", "dreta"];
 
-// ---------- FUNCIONS ----------
+// ================== ESTADO ==================
+let waitingPlayer = null; // { token }
+let games = new Map(); // gameId -> gameState
+
+// ================== UTILS ==================
 function isValidMove(move) {
   if (!move) return false;
-
   const { shot, save } = move;
-  if (!shot || !save) return false;
 
   return (
+    shot &&
+    save &&
     VALID_HEIGHTS.includes(shot.height) &&
     VALID_DIRECTIONS.includes(shot.direction) &&
     VALID_HEIGHTS.includes(save.height) &&
@@ -39,76 +38,156 @@ function calculatePoints(shot, save) {
   return points;
 }
 
-// ---------- ENDPOINTS ----------
+// ================== ENDPOINTS ==================
 
-// JOIN
+// -------- JOIN --------
 app.post("/join", (req, res) => {
-  if (playersJoined >= 2) {
-    return res.status(403).json({
-      error: "Ja hi ha 2 jugadors connectats"
+  const playerToken = crypto.randomUUID();
+
+  // Si hay alguien esperando -> crear partida
+  if (waitingPlayer) {
+    const gameId = crypto.randomUUID();
+
+    games.set(gameId, {
+      gameId,
+      round: 1,
+      maxRounds: MAX_ROUNDS,
+      scores: { p1: 0, p2: 0 },
+      players: {
+        p1: waitingPlayer.token,
+        p2: playerToken
+      },
+      moves: { p1: null, p2: null },
+      status: "playing"
+    });
+
+    waitingPlayer = null;
+
+    return res.json({
+      status: "matched",
+      player: 2,
+      playerToken,
+      gameId
     });
   }
 
-  playersJoined++;
-  res.json({ player: playersJoined });
+  // Si no hay nadie esperando -> esperar
+  waitingPlayer = { token: playerToken };
+
+  res.json({
+    status: "waiting",
+    player: 1,
+    playerToken,
+    gameId: null
+  });
 });
 
-// MOVE
-app.post("/move", (req, res) => {
-  const { player, shot, save } = req.body;
+// -------- GAME STATE --------
+app.get("/game-state", (req, res) => {
+  const { gameId, playerToken } = req.query;
 
-  if (![1, 2].includes(player)) {
-    return res.status(400).json({ error: "Jugador invàlid" });
-  }
+  const game = games.get(gameId);
+  if (!game) return res.status(404).json({ error: "Partida no encontrada" });
+
+  const isP1 = game.players.p1 === playerToken;
+  const isP2 = game.players.p2 === playerToken;
+
+  if (!isP1 && !isP2)
+    return res.status(403).json({ error: "No perteneces a esta partida" });
+
+  res.json({
+    status: game.status,
+    round: game.round,
+    maxRounds: game.maxRounds,
+    p1Points: game.scores.p1,
+    p2Points: game.scores.p2,
+    yourMoveDone: isP1 ? !!game.moves.p1 : !!game.moves.p2
+  });
+});
+
+// -------- MOVE --------
+app.post("/move", (req, res) => {
+  const { gameId, playerToken, shot, save } = req.body;
+
+  const game = games.get(gameId);
+  if (!game) return res.status(404).json({ error: "Partida no encontrada" });
+
+  let playerKey = null;
+  if (game.players.p1 === playerToken) playerKey = "p1";
+  if (game.players.p2 === playerToken) playerKey = "p2";
+
+  if (!playerKey)
+    return res.status(403).json({ error: "No perteneces a esta partida" });
 
   const move = { shot, save };
-
-  if (!isValidMove(move)) {
+  if (!isValidMove(move))
     return res.status(400).json({
-      error: "Moviment invàlid",
+      error: "Movimiento inválido",
       validHeights: VALID_HEIGHTS,
       validDirections: VALID_DIRECTIONS
     });
-  }
 
-  moves[player] = move;
+  if (game.moves[playerKey])
+    return res.status(400).json({ error: "Ya has jugado esta ronda" });
 
-  // Esperant l'altre jugador
-  if (!moves[1] || !moves[2]) {
+  game.moves[playerKey] = move;
+
+  // Esperar al otro jugador
+  if (!game.moves.p1 || !game.moves.p2) {
     return res.json({
       status: "waiting",
-      message: "Esperant a l'altre jugador"
+      message: "Esperando al otro jugador"
     });
   }
 
-  // Calcular punts
-  const p1Points = calculatePoints(moves[2].shot, moves[1].save);
-  const p2Points = calculatePoints(moves[1].shot, moves[2].save);
+  // Calcular puntos
+  const p1Points = calculatePoints(game.moves.p2.shot, game.moves.p1.save);
+  const p2Points = calculatePoints(game.moves.p1.shot, game.moves.p2.save);
 
-  let winner = "empat";
-  if (p1Points > p2Points) winner = "player1";
-  if (p2Points > p1Points) winner = "player2";
+  game.scores.p1 += p1Points;
+  game.scores.p2 += p2Points;
+
+  // Siguiente ronda o fin
+  if (game.round >= game.maxRounds) {
+    game.status = "game_over";
+
+    let winner = "draw";
+    if (game.scores.p1 > game.scores.p2) winner = "player1";
+    if (game.scores.p2 > game.scores.p1) winner = "player2";
+
+    return res.json({
+      status: "game_over",
+      p1Points: game.scores.p1,
+      p2Points: game.scores.p2,
+      winner
+    });
+  }
+
+  game.round++;
+  game.moves = { p1: null, p2: null };
+  game.status = "playing";
 
   res.json({
-    status: "finished",
-    p1Points,
-    p2Points,
-    winner
+    status: "round_finished",
+    p1Points: game.scores.p1,
+    p2Points: game.scores.p2,
+    nextRound: game.round
   });
 });
 
-// RESET
+// -------- RESET (debug) --------
 app.post("/reset", (req, res) => {
-  playersJoined = 0;
-  moves = { 1: null, 2: null };
+  waitingPlayer = null;
+  games.clear();
 
   res.json({
     status: "reset",
-    message: "Partida reiniciada"
+    message: "Servidor reiniciado"
   });
 });
 
-// ---------- START ----------
+// ================== START ==================
 app.listen(PORT, () => {
-  console.log(`Servidor actiu al port ${PORT}`);
+  console.log(`Servidor activo en puerto ${PORT}`);
 });
+
