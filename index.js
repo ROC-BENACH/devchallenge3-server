@@ -1,66 +1,65 @@
 const express = require("express");
 const cors = require("cors");
+const { v4: uuidv4 } = require("uuid");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 8080;
+// 🔥 MEMÒRIA GLOBAL (IMPORTANT)
+const games = {};
 
-/* 👉 AIXÒ ÉS EL QUE FALTAVA */
+// ✅ HEALTH CHECK (OBLIGATORI)
 app.get("/", (req, res) => {
   res.send("DevChallenge3 server OK");
 });
 
-/* ====== JOC ONLINE ====== */
-
-let games = {};
-
+// ✅ JOIN (POST)
 app.post("/join", (req, res) => {
+  console.log("POST /join");
+
   let game = Object.values(games).find(g => g.players.length < 2);
 
   if (!game) {
-    const gameId = Math.random().toString(36).substring(2, 9);
-    game = {
+    const gameId = uuidv4();
+    games[gameId] = {
       id: gameId,
       players: ["P1"],
-      turn: "P1",
-      finished: false,
-      score: { P1: 0, P2: 0 }
+      finished: false
     };
-    games[gameId] = game;
-    return res.json({ gameId, role: "P1" });
-  } else {
-    game.players.push("P2");
-    return res.json({ gameId: game.id, role: "P2" });
+
+    console.log("Created game", gameId);
+
+    return res.json({
+      gameId,
+      role: "P1"
+    });
   }
+
+  game.players.push("P2");
+  console.log("Joined game", game.id);
+
+  res.json({
+    gameId: game.id,
+    role: "P2"
+  });
 });
 
+// ✅ STATE
 app.get("/state/:gameId", (req, res) => {
   const game = games[req.params.gameId];
-  if (!game) return res.status(404).end();
+  if (!game) return res.status(404).json({ error: "Game not found" });
   res.json(game);
 });
 
+// ✅ PLAY (encara no fa res, però no peta)
 app.post("/play", (req, res) => {
-  const { gameId, player } = req.body;
-  const game = games[gameId];
-  if (!game || game.finished) return res.status(400).end();
-
-  if (player !== game.turn) return res.status(403).end();
-
-  game.score[player]++;
-  game.turn = player === "P1" ? "P2" : "P1";
-
-  if (game.score[player] >= 3) {
-    game.finished = true;
-  }
-
-  res.json({ ok: true, game });
+  console.log("POST /play", req.body);
+  res.json({ ok: true });
 });
 
-/* ======================= */
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server OK on ${PORT}`);
+// 🔥 PORT DINÀMIC (OBLIGATORI PER RENDER)
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+  console.log("Server OK on", PORT);
 });
