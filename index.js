@@ -6,56 +6,78 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const PORT = process.env.PORT || 3000;
+
+// Estat en memòria
 const games = {};
 
-// JOIN
-app.post("/join", (req, res) => {
-  let waitingGame = Object.values(games).find(g => g.players.length === 1);
-
-  if (!waitingGame) {
-    const gameId = uuidv4();
-    games[gameId] = {
-      id: gameId,
-      players: ["P1"],
-      turn: "P1",
-      plays: [],
-      finished: false
-    };
-    return res.json({ gameId, role: "P1", status: "waiting" });
-  }
-
-  waitingGame.players.push("P2");
-  return res.json({
-    gameId: waitingGame.id,
-    role: "P2",
-    status: "matched"
-  });
+/**
+ * Endpoint de prova
+ */
+app.get("/", (req, res) => {
+  res.send("DevChallenge3 server OK");
 });
 
-// STATE
-app.get("/state/:id", (req, res) => {
-  const game = games[req.params.id];
+/**
+ * JOIN: crear o unir-se a una partida
+ */
+app.post("/join", (req, res) => {
+  // Busca partida oberta
+  let game = Object.values(games).find(g => g.players.length === 1);
+
+  if (!game) {
+    const gameId = uuidv4();
+    game = {
+      id: gameId,
+      players: ["J1"],
+      moves: {},
+      turn: "J1",
+      finished: false
+    };
+    games[gameId] = game;
+
+    return res.json({ gameId, role: "J1" });
+  }
+
+  game.players.push("J2");
+  return res.json({ gameId: game.id, role: "J2" });
+});
+
+/**
+ * GET STATE
+ */
+app.get("/state/:gameId", (req, res) => {
+  const game = games[req.params.gameId];
   if (!game) return res.status(404).json({ error: "Game not found" });
   res.json(game);
 });
 
-// PLAY
+/**
+ * PLAY MOVE
+ */
 app.post("/play", (req, res) => {
   const { gameId, player, move } = req.body;
   const game = games[gameId];
 
-  if (!game || game.finished)
+  if (!game || game.finished) {
     return res.status(400).json({ error: "Invalid game" });
+  }
 
-  if (game.turn !== player)
+  if (game.turn !== player) {
     return res.status(400).json({ error: "Not your turn" });
+  }
 
-  game.plays.push({ player, move });
-  game.turn = player === "P1" ? "P2" : "P1";
+  game.moves[player] = move;
+  game.turn = player === "J1" ? "J2" : "J1";
 
-  if (game.plays.length >= 10) game.finished = true;
+  // Si els dos han jugat, acabem
+  if (game.moves["J1"] && game.moves["J2"]) {
+    game.finished = true;
+  }
 
-  res.json(game);
+  res.json({ ok: true });
 });
 
-app.listen(3000, () => console.log("Server OK on 3000"));
+app.listen(PORT, () => {
+  console.log("Server OK on " + PORT);
+});
