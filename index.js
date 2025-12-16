@@ -6,55 +6,72 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
-
-// Estat en memòria
+/**
+ * Games memory store
+ * gameId -> {
+ *   players: [{ id, role }],
+ *   turn: "J1" | "J2",
+ *   finished: boolean,
+ *   scores: { J1: number, J2: number }
+ * }
+ */
 const games = {};
 
-/**
- * Endpoint de prova
- */
+/* ======================
+   HEALTH CHECK
+====================== */
 app.get("/", (req, res) => {
   res.send("DevChallenge3 server OK");
 });
 
-/**
- * JOIN: crear o unir-se a una partida
- */
+/* ======================
+   JOIN GAME
+====================== */
 app.post("/join", (req, res) => {
-  // Busca partida oberta
-  let game = Object.values(games).find(g => g.players.length === 1);
+  let game = Object.values(games).find(g => g.players.length < 2);
 
   if (!game) {
     const gameId = uuidv4();
     game = {
-      id: gameId,
-      players: ["J1"],
-      moves: {},
+      gameId,
+      players: [],
       turn: "J1",
-      finished: false
+      finished: false,
+      scores: { J1: 0, J2: 0 }
     };
     games[gameId] = game;
-
-    return res.json({ gameId, role: "J1" });
   }
 
-  game.players.push("J2");
-  return res.json({ gameId: game.id, role: "J2" });
+  const role = game.players.length === 0 ? "J1" : "J2";
+  const playerId = uuidv4();
+
+  game.players.push({ id: playerId, role });
+
+  res.json({
+    gameId: game.gameId,
+    playerId,
+    role
+  });
 });
 
-/**
- * GET STATE
- */
+/* ======================
+   GET GAME STATE
+====================== */
 app.get("/state/:gameId", (req, res) => {
   const game = games[req.params.gameId];
-  if (!game) return res.status(404).json({ error: "Game not found" });
-  res.json(game);
+  if (!game) return res.status(404).end();
+
+  res.json({
+    players: game.players,
+    turn: game.turn,
+    finished: game.finished,
+    scores: game.scores
+  });
 });
 
-/**
- * PLAY MOVE
- */
+/* ======================
+   PLAY MOVE
+====================== */
 app.post("/play", (req, res) => {
   const { gameId, player, move } = req.body;
   const game = games[gameId];
@@ -67,17 +84,34 @@ app.post("/play", (req, res) => {
     return res.status(400).json({ error: "Not your turn" });
   }
 
-  game.moves[player] = move;
+  // Random goal / save (simple logic)
+  const goal = Math.random() < 0.5;
+
+  if (goal) {
+    game.scores[player]++;
+  }
+
+  // Change turn
   game.turn = player === "J1" ? "J2" : "J1";
 
-  // Si els dos han jugat, acabem
-  if (game.moves["J1"] && game.moves["J2"]) {
+  // End game after 10 shots total
+  const totalShots = game.scores.J1 + game.scores.J2;
+  if (totalShots >= 10) {
     game.finished = true;
   }
 
-  res.json({ ok: true });
+  res.json({
+    goal,
+    scores: game.scores,
+    nextTurn: game.turn,
+    finished: game.finished
+  });
 });
 
-app.listen(PORT, () => {
+/* ======================
+   START SERVER (IMPORTANT)
+====================== */
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, "0.0.0.0", () => {
   console.log("Server OK on " + PORT);
 });
