@@ -6,60 +6,52 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔥 MEMÒRIA GLOBAL (IMPORTANT)
-const games = {};
+const PORT = process.env.PORT || 8080;
 
-// ✅ HEALTH CHECK (OBLIGATORI)
+let waitingPlayer = null;
+let matches = {};
+
 app.get("/", (req, res) => {
   res.send("DevChallenge3 server OK");
 });
 
-// ✅ JOIN (POST)
 app.post("/join", (req, res) => {
-  console.log("POST /join");
+  const playerId = uuidv4();
 
-  let game = Object.values(games).find(g => g.players.length < 2);
-
-  if (!game) {
-    const gameId = uuidv4();
-    games[gameId] = {
-      id: gameId,
-      players: ["P1"],
-      finished: false
-    };
-
-    console.log("Created game", gameId);
-
-    return res.json({
-      gameId,
-      role: "P1"
-    });
+  if (!waitingPlayer) {
+    waitingPlayer = playerId;
+    return res.json({ status: "waiting", playerId });
   }
 
-  game.players.push("P2");
-  console.log("Joined game", game.id);
+  const matchId = uuidv4();
+
+  matches[matchId] = {
+    p1: waitingPlayer,
+    p2: playerId
+  };
+
+  waitingPlayer = null;
 
   res.json({
-    gameId: game.id,
-    role: "P2"
+    status: "matched",
+    matchId,
+    playerId
   });
 });
 
-// ✅ STATE
-app.get("/state/:gameId", (req, res) => {
-  const game = games[req.params.gameId];
-  if (!game) return res.status(404).json({ error: "Game not found" });
-  res.json(game);
+app.get("/status/:playerId", (req, res) => {
+  const { playerId } = req.params;
+
+  for (const matchId in matches) {
+    const m = matches[matchId];
+    if (m.p1 === playerId || m.p2 === playerId) {
+      return res.json({ status: "matched", matchId });
+    }
+  }
+
+  res.json({ status: "waiting" });
 });
 
-// ✅ PLAY (encara no fa res, però no peta)
-app.post("/play", (req, res) => {
-  console.log("POST /play", req.body);
-  res.json({ ok: true });
-});
-
-// 🔥 PORT DINÀMIC (OBLIGATORI PER RENDER)
-const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log("Server OK on", PORT);
 });
