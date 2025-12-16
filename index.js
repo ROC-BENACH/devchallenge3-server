@@ -1,117 +1,66 @@
 const express = require("express");
 const cors = require("cors");
-const { v4: uuidv4 } = require("uuid");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-/**
- * Games memory store
- * gameId -> {
- *   players: [{ id, role }],
- *   turn: "J1" | "J2",
- *   finished: boolean,
- *   scores: { J1: number, J2: number }
- * }
- */
-const games = {};
+const PORT = process.env.PORT || 8080;
 
-/* ======================
-   HEALTH CHECK
-====================== */
+/* 👉 AIXÒ ÉS EL QUE FALTAVA */
 app.get("/", (req, res) => {
   res.send("DevChallenge3 server OK");
 });
 
-/* ======================
-   JOIN GAME
-====================== */
+/* ====== JOC ONLINE ====== */
+
+let games = {};
+
 app.post("/join", (req, res) => {
   let game = Object.values(games).find(g => g.players.length < 2);
 
   if (!game) {
-    const gameId = uuidv4();
+    const gameId = Math.random().toString(36).substring(2, 9);
     game = {
-      gameId,
-      players: [],
-      turn: "J1",
+      id: gameId,
+      players: ["P1"],
+      turn: "P1",
       finished: false,
-      scores: { J1: 0, J2: 0 }
+      score: { P1: 0, P2: 0 }
     };
     games[gameId] = game;
+    return res.json({ gameId, role: "P1" });
+  } else {
+    game.players.push("P2");
+    return res.json({ gameId: game.id, role: "P2" });
   }
-
-  const role = game.players.length === 0 ? "J1" : "J2";
-  const playerId = uuidv4();
-
-  game.players.push({ id: playerId, role });
-
-  res.json({
-    gameId: game.gameId,
-    playerId,
-    role
-  });
 });
 
-/* ======================
-   GET GAME STATE
-====================== */
 app.get("/state/:gameId", (req, res) => {
   const game = games[req.params.gameId];
   if (!game) return res.status(404).end();
-
-  res.json({
-    players: game.players,
-    turn: game.turn,
-    finished: game.finished,
-    scores: game.scores
-  });
+  res.json(game);
 });
 
-/* ======================
-   PLAY MOVE
-====================== */
 app.post("/play", (req, res) => {
-  const { gameId, player, move } = req.body;
+  const { gameId, player } = req.body;
   const game = games[gameId];
+  if (!game || game.finished) return res.status(400).end();
 
-  if (!game || game.finished) {
-    return res.status(400).json({ error: "Invalid game" });
-  }
+  if (player !== game.turn) return res.status(403).end();
 
-  if (game.turn !== player) {
-    return res.status(400).json({ error: "Not your turn" });
-  }
+  game.score[player]++;
+  game.turn = player === "P1" ? "P2" : "P1";
 
-  // Random goal / save (simple logic)
-  const goal = Math.random() < 0.5;
-
-  if (goal) {
-    game.scores[player]++;
-  }
-
-  // Change turn
-  game.turn = player === "J1" ? "J2" : "J1";
-
-  // End game after 10 shots total
-  const totalShots = game.scores.J1 + game.scores.J2;
-  if (totalShots >= 10) {
+  if (game.score[player] >= 3) {
     game.finished = true;
   }
 
-  res.json({
-    goal,
-    scores: game.scores,
-    nextTurn: game.turn,
-    finished: game.finished
-  });
+  res.json({ ok: true, game });
 });
 
-/* ======================
-   START SERVER (IMPORTANT)
-====================== */
-const PORT = process.env.PORT || 3000;
+/* ======================= */
+
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("Server OK on " + PORT);
+  console.log(`Server OK on ${PORT}`);
 });
